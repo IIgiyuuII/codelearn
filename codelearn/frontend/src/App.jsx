@@ -1,0 +1,53 @@
+import React, { useState, useEffect } from 'react';
+import AuthPage from './pages/AuthPage';
+import CoursesPage from './pages/CoursesPage';
+import CourseTasksPage from './pages/CourseTasksPage';
+import SolverPage from './pages/SolverPage';
+import ProfilePage from './pages/ProfilePage';
+
+export default function App() {
+  const [page, setPage] = useState('auth');
+  const [username, setUsername] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState(null); // { id, title }
+  const [selectedTask, setSelectedTask] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const saved = localStorage.getItem('username');
+    if (token && saved) {
+      setUsername(saved);
+      setPage('courses');
+    }
+  }, []);
+
+  function handleAuth(name) {
+    setUsername(name);
+    localStorage.setItem('username', name);
+    setPage('courses');
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    setUsername('');
+    setPage('auth');
+  }
+
+  function handleSelectCourse(id, title) {
+    setSelectedCourse({ id, title });
+    setPage('courseTasks');
+  }
+
+  function handleSelectTask(id) {
+    setSelectedTask(id);
+    setPage('solver');
+  }
+
+  if (page === 'auth')        return <AuthPage onAuth={handleAuth} />;
+  if (page === 'courses')     return <CoursesPage username={username} onSelectCourse={handleSelectCourse} onProfile={() => setPage('profile')} onLogout={handleLogout} />;
+  if (page === 'courseTasks') return <CourseTasksPage courseId={selectedCourse?.id} courseTitle={selectedCourse?.title} onSelectTask={handleSelectTask} onBack={() => setPage('courses')} />;
+  if (page === 'solver')      return <SolverPage taskId={selectedTask} onBack={() => setPage('courseTasks')} />;
+  if (page === 'profile')     return <ProfilePage username={username} onBack={() => setPage('courses')} />;
+
+  return null;
+}

@@ -1,0 +1,44 @@
+.ctasks-layout { min-height: 100vh; background: var(--bg); }
+
+.ctasks-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 32px; height: 60px;
+  border-bottom: 1px solid var(--border); background: var(--bg2);
+  position: sticky; top: 0; z-index: 10;
+}
+.ctasks-logo { font-family: var(--font-display); font-size: 16px; font-weight: 900; letter-spacing: -0.3px; }
+.ctasks-back {
+  background: transparent; color: var(--muted); font-size: 13px;
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  font-family: var(--font-mono); transition: all 0.2s; width: 100px; text-align: left;
+}
+.ctasks-back:hover { color: var(--text); border-color: var(--accent); }
+
+.ctasks-progress { display: flex; align-items: baseline; gap: 3px; font-size: 13px; width: 100px; justify-content: flex-end; }
+.ctasks-progress-num { color: var(--accent2); font-weight: 700; }
+.ctasks-progress-label { color: var(--muted); font-size: 11px; margin-left: 2px; }
+
+.ctasks-main { max-width: 1000px; margin: 0 auto; padding: 48px 24px; }
+.ctasks-title-block { margin-bottom: 40px; }
+.ctasks-title { font-family: var(--font-display); font-size: 32px; font-weight: 900; letter-spacing: -1px; }
+.ctasks-loading, .ctasks-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 60px; }
+
+.ctasks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+
+.ctask-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 20px; text-align: left; transition: all 0.2s; cursor: pointer; position: relative; overflow: hidden;
+}
+.ctask-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); opacity: 0; transition: opacity 0.2s; }
+.ctask-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(124,106,247,0.15); }
+.ctask-card:hover::before { opacity: 1; }
+.ctask-card.solved { border-color: rgba(52,211,153,0.3); }
+.ctask-card.solved::before { background: var(--green); opacity: 1; }
+
+.ctask-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.ctask-card-num { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.05em; }
+.ctask-card-check { color: var(--green); font-size: 14px; font-weight: 700; }
+.ctask-card-title { font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; margin-bottom: 16px; min-height: 42px; }
+.ctask-card-bottom { display: flex; justify-content: space-between; align-items: center; }
+.ctask-card-topic { font-size: 11px; color: var(--muted); background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+.ctask-card-diff { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }

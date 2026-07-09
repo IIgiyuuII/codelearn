@@ -1,0 +1,30 @@
+# Зависимости
+node_modules/
+vendor/
+
+# Бинарные файлы Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Файлы IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+
+# Временные файлы
+tmp/
+temp/
