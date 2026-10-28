@@ -20,6 +20,18 @@ export default function App() {
     }
   }, []);
 
+  // Сессия истекла (api.js получил 401) — возвращаем на страницу входа
+  useEffect(() => {
+    const onExpired = () => {
+      setUsername('');
+      setSelectedCourse(null);
+      setSelectedTask(null);
+      setPage('auth');
+    };
+    window.addEventListener('auth:expired', onExpired);
+    return () => window.removeEventListener('auth:expired', onExpired);
+  }, []);
+
   function handleAuth(name) {
     setUsername(name);
     localStorage.setItem('username', name);

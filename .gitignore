@@ -1,6 +1,13 @@
+# Секреты — никогда не коммитить
+.env
+*.env.local
+
 # Зависимости
 node_modules/
 vendor/
+
+# Сборка
+build/
 
 # Бинарные файлы Go
 *.exe
@@ -22,9 +29,7 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Логи
+# Логи и временные файлы
 *.log
-
-# Временные файлы
 tmp/
 temp/

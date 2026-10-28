@@ -5,57 +5,68 @@ function authHeaders() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
 }
 
+// Токен протух или недействителен: чистим сессию и сообщаем App.jsx,
+// который вернёт пользователя на страницу входа.
+function handleUnauthorized() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  window.dispatchEvent(new Event('auth:expired'));
+}
+
+/**
+ * Единая точка для всех запросов.
+ * - всегда возвращает объект (при сбое сети или не-JSON ответе — { error });
+ * - на 401 для защищённых запросов разлогинивает пользователя. Промис при этом
+ *   намеренно НЕ завершается: страница всё равно будет размонтирована, и её
+ *   .then() не успеет упасть на данных, которых нет.
+ */
+async function request(path, { method = 'GET', body, auth = true } = {}) {
+  let r;
+  try {
+    r = await fetch(`${BASE}${path}`, {
+      method,
+      headers: auth ? authHeaders() : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    return { error: 'Нет связи с сервером' };
+  }
+
+  if (auth && r.status === 401) {
+    handleUnauthorized();
+    return new Promise(() => {});
+  }
+
+  try {
+    return await r.json();
+  } catch {
+    return { error: `Ошибка сервера (${r.status})` };
+  }
+}
+
 export const api = {
-  async register(username, password) {
-    const r = await fetch(`${BASE}/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-    return r.json();
-  },
-  async login(username, password) {
-    const r = await fetch(`${BASE}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-    return r.json();
-  },
+  register: (username, password) =>
+    request('/register', { method: 'POST', body: { username, password }, auth: false }),
+  login: (username, password) =>
+    request('/login', { method: 'POST', body: { username, password }, auth: false }),
 
   // ─── Courses ───
-  async getCourses() {
-    const r = await fetch(`${BASE}/courses`, { headers: authHeaders() });
-    return r.json();
-  },
-  async createCourse(title, description, language) {
-    const r = await fetch(`${BASE}/courses`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ title, description, language }) });
-    return r.json();
-  },
-  async joinCourse(code) {
-    const r = await fetch(`${BASE}/courses/join`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ code }) });
-    return r.json();
-  },
-  async getCourseTasks(courseId) {
-    const r = await fetch(`${BASE}/courses/${courseId}/tasks`, { headers: authHeaders() });
-    return r.json();
-  },
-  async addCourseTask(courseId, task) {
-    const r = await fetch(`${BASE}/courses/${courseId}/tasks`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(task) });
-    return r.json();
-  },
+  getCourses: () => request('/courses'),
+  createCourse: (title, description, language) =>
+    request('/courses', { method: 'POST', body: { title, description, language } }),
+  joinCourse: (code) => request('/courses/join', { method: 'POST', body: { code } }),
+  getCourseTasks: (courseId) => request(`/courses/${courseId}/tasks`),
+  addCourseTask: (courseId, task) =>
+    request(`/courses/${courseId}/tasks`, { method: 'POST', body: task }),
 
   // ─── Tasks ───
-  async getTask(id) {
-    const r = await fetch(`${BASE}/tasks/${id}`, { headers: authHeaders() });
-    return r.json();
-  },
-  async getExamples(taskId) {
-    const r = await fetch(`${BASE}/tasks/${taskId}/examples`, { headers: authHeaders() });
-    return r.json();
-  },
-  async getTests(taskId) {
-    const r = await fetch(`${BASE}/tasks/${taskId}/get-tests`, { method: 'POST', headers: authHeaders() });
-    return r.json();
-  },
-  async markSolved(taskId) {
-    const r = await fetch(`${BASE}/tasks/${taskId}/solved`, { method: 'POST', headers: authHeaders() });
-    return r.json();
-  },
-  async getProgress() {
-    const r = await fetch(`${BASE}/progress`, { headers: authHeaders() });
-    return r.json();
-  },
+  getTask: (id) => request(`/tasks/${id}`),
+  // Только для владельца курса: задача целиком, включая скрытые тесты
+  getTaskFull: (id) => request(`/tasks/${id}/full`),
+  updateTask: (id, task) => request(`/tasks/${id}`, { method: 'PUT', body: task }),
+  deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
+  getExamples: (taskId) => request(`/tasks/${taskId}/examples`),
+  getTests: (taskId) => request(`/tasks/${taskId}/get-tests`, { method: 'POST' }),
+  markSolved: (taskId) => request(`/tasks/${taskId}/solved`, { method: 'POST' }),
+  getProgress: () => request('/progress'),
 };

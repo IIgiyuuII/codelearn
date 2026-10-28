@@ -6,6 +6,7 @@ import './SolverPage.css';
 
 export default function SolverPage({ taskId, onBack }) {
   const [task, setTask] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [examples, setExamples] = useState([]);
   const [code, setCode] = useState('');
   const [output, setOutput] = useState(null);
@@ -26,7 +27,12 @@ export default function SolverPage({ taskId, onBack }) {
   const editorRef = useRef(null);
 
   useEffect(() => {
+    setLoadError('');
     api.getTask(taskId).then(data => {
+      if (data.error) {
+        setLoadError(data.error);
+        return;
+      }
       setTask(data);
       setCode(data.starterCode || '');
     });
@@ -71,16 +77,25 @@ export default function SolverPage({ taskId, onBack }) {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }
 
+  // Вывод программы + сообщение об ошибке / непройденном тесте
+  function joinText(res) {
+    return [res.output, res.error].filter(Boolean).join('\n') || '(нет вывода)';
+  }
+
   // ─── Run ─────────────────────────────────────────────────────────────────
   async function handleRun() {
     if (pyStatus !== 'ready') return;
     setRunning(true);
     setOutput(null);
     setOutputOpen(false);
-    const { output: out, error, durationMs } = await runCode(code);
-    const result = { text: error || out || '(нет вывода)', isError: !!error, passed: null, durationMs };
-    setOutput(result);
-    if (error || out) setOutputOpen(true);
+    const res = await runCode(code);
+    setOutput({
+      text: joinText(res),
+      isError: res.status === 'runtime_error',
+      passed: null,
+      durationMs: res.durationMs,
+    });
+    if (res.error || res.output) setOutputOpen(true);
     setRunning(false);
   }
 
@@ -101,12 +116,17 @@ export default function SolverPage({ taskId, onBack }) {
         return;
       }
 
-      const { output: out, error, durationMs } = await runCode(code, tests);
-      const passed = !error && out.includes('✓ Все тесты пройдены!');
+      // Вердикт приходит из раннера (результат выполнения), а не из текста в stdout
+      const res = await runCode(code, tests);
 
-      setOutput({ text: error || out || '(нет вывода)', isError: !!error, passed, durationMs });
+      setOutput({
+        text: joinText(res),
+        isError: res.status === 'runtime_error',
+        passed: res.passed,
+        durationMs: res.durationMs,
+      });
 
-      if (passed) {
+      if (res.passed) {
         setSolved(true);
         setOutputOpen(false);
         await api.markSolved(taskId);
@@ -150,6 +170,15 @@ export default function SolverPage({ taskId, onBack }) {
   const iconState = !output ? 'none' : (output.isError || output.passed === false) ? 'error' : 'info';
   const pyReady = pyStatus === 'ready';
   const busy = checking || running;
+
+  if (loadError) {
+    return (
+      <div className="solver-loading">
+        <div>{loadError}</div>
+        <button className="solver-btn-reset" style={{ marginTop: 16 }} onClick={onBack}>← Назад</button>
+      </div>
+    );
+  }
 
   if (!task) return <div className="solver-loading">Загрузка задачи...</div>;
 

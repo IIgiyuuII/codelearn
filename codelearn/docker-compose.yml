@@ -1,0 +1,27 @@
+# Поднимает PostgreSQL с готовой схемой и начальными данными:
+#   docker compose up -d
+# Скрипты из db/ выполняются ТОЛЬКО при первом создании тома.
+# Чтобы начать с чистой базы:  docker compose down -v && docker compose up -d
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: codelearn-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Укажите DB_PASSWORD в файле .env}
+      POSTGRES_DB: ${DB_NAME:-CodeLearn}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - codelearn_pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-CodeLearn}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  codelearn_pgdata:
