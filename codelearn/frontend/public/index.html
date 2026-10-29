@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CodeLearn — Учись программировать</title>
-    <!-- Pyodide — Python в браузере через WebAssembly -->
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <!-- Pyodide больше не подключается здесь: он загружается внутри Web Worker
+         (src/hooks/pyodide.worker.js), поэтому не блокирует отрисовку страницы. -->
   </head>
   <body>
     <div id="root"></div>

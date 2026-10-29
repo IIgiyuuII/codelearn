@@ -22,7 +22,7 @@ export default function SolverPage({ taskId, onBack }) {
   const isDragging = useRef(false);
   const splitContainerRef = useRef(null);
 
-  const { status: pyStatus, runCode } = usePyodide();
+  const { status: pyStatus, runCode, cancel, retry } = usePyodide();
   const toastTimer = useRef(null);
   const editorRef = useRef(null);
 
@@ -77,6 +77,9 @@ export default function SolverPage({ taskId, onBack }) {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }
 
+  // Статусы раннера: ok | test_failed | runtime_error | timeout | cancelled
+  const isFailure = res => res.status === 'runtime_error' || res.status === 'timeout';
+
   // Вывод программы + сообщение об ошибке / непройденном тесте
   function joinText(res) {
     return [res.output, res.error].filter(Boolean).join('\n') || '(нет вывода)';
@@ -89,9 +92,14 @@ export default function SolverPage({ taskId, onBack }) {
     setOutput(null);
     setOutputOpen(false);
     const res = await runCode(code);
+    if (res.status === 'cancelled') { // остановлено кнопкой «Стоп» — вывода показывать нечего
+      setRunning(false);
+      return;
+    }
     setOutput({
       text: joinText(res),
-      isError: res.status === 'runtime_error',
+      isError: isFailure(res),
+      kind: res.status,
       passed: null,
       durationMs: res.durationMs,
     });
@@ -119,9 +127,16 @@ export default function SolverPage({ taskId, onBack }) {
       // Вердикт приходит из раннера (результат выполнения), а не из текста в stdout
       const res = await runCode(code, tests);
 
+      if (res.status === 'cancelled') {
+        showToast('error', 'Проверка остановлена');
+        setChecking(false);
+        return;
+      }
+
       setOutput({
         text: joinText(res),
-        isError: res.status === 'runtime_error',
+        isError: isFailure(res),
+        kind: res.status,
         passed: res.passed,
         durationMs: res.durationMs,
       });
@@ -133,7 +148,7 @@ export default function SolverPage({ taskId, onBack }) {
         showToast('success', '✓ Задача решена!');
       } else {
         setOutputOpen(true);
-        showToast('error', '✗ Тесты не пройдены');
+        showToast('error', res.status === 'timeout' ? '⏱ Время выполнения вышло' : '✗ Тесты не пройдены');
       }
     } catch (e) {
       setOutput({ text: 'Ошибка: ' + e.message, isError: true, passed: false, durationMs: 0 });
@@ -220,6 +235,9 @@ export default function SolverPage({ taskId, onBack }) {
             {pyStatus === 'ready' && 'Python готов · WASM'}
             {pyStatus === 'error' && 'Ошибка загрузки Python'}
           </span>
+          {pyStatus === 'error' && (
+            <button className="solver-btn-reset" onClick={retry}>повторить</button>
+          )}
         </div>
       </aside>
 
@@ -245,8 +263,9 @@ export default function SolverPage({ taskId, onBack }) {
                     <div className="output-popover-arrow" />
                     <div className="output-popover-header">
                       <span className="output-popover-title">
+                        {output?.kind === 'timeout' && '⏱ Время выполнения вышло'}
                         {output?.passed === false && !output?.isError && '✗ Тесты не пройдены'}
-                        {output?.isError && '✗ Ошибка выполнения'}
+                        {output?.isError && output?.kind !== 'timeout' && '✗ Ошибка выполнения'}
                         {output?.passed === null && !output?.isError && '› Вывод программы'}
                       </span>
                       <div className="output-popover-meta">
@@ -309,8 +328,14 @@ export default function SolverPage({ taskId, onBack }) {
 
             {/* Кнопки действий */}
             <div className="solver-actions-inline">
-              <button className="solver-btn-run" onClick={handleRun} disabled={!pyReady || busy}>
-                {running ? '⏳' : '▶ Запустить'}
+              <button
+                className="solver-btn-run"
+                onClick={busy ? cancel : handleRun}
+                disabled={!busy && !pyReady}
+                style={busy ? { borderColor: 'var(--red)', color: 'var(--red)' } : undefined}
+                title={busy ? 'Остановить выполнение' : undefined}
+              >
+                {busy ? '■ Стоп' : '▶ Запустить'}
               </button>
               <button className="solver-btn-check" onClick={handleCheck} disabled={!pyReady || busy}>
                 {checking ? '⏳ Проверка...' : '✓ Проверить'}

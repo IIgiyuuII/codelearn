@@ -5,6 +5,7 @@ import CourseTasksPage from './pages/CourseTasksPage';
 import CourseManagePage from './pages/CourseManagePage';
 import SolverPage from './pages/SolverPage';
 import ProfilePage from './pages/ProfilePage';
+import { preloadPython } from './hooks/usePyodide';
 
 export default function App() {
   const [page, setPage] = useState('auth');
@@ -20,6 +21,12 @@ export default function App() {
       setPage('courses');
     }
   }, []);
+
+  // Python (Pyodide) начинаем грузить сразу после входа: пока студент выбирает курс и задачу,
+  // движок уже готов. Загрузка идёт в фоне (Web Worker) и интерфейс не тормозит.
+  useEffect(() => {
+    if (page !== 'auth') preloadPython();
+  }, [page]);
 
   // Сессия истекла (api.js получил 401) — возвращаем на страницу входа
   useEffect(() => {

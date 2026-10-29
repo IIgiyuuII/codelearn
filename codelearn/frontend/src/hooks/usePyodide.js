@@ -1,45 +1,33 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createRunner } from './pythonRunner';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { PythonEngine } from './pythonEngine';
 
-const PYODIDE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/';
+// Единственный на всё приложение движок: Pyodide грузится один раз и переживает
+// переходы между страницами. Воркер создаётся лениво — при первом start().
+const engine = new PythonEngine(() => new Worker(new URL('./pyodide.worker.js', import.meta.url)));
 
+/** Прогрев: начать загрузку Python заранее (вызывается после входа в приложение). */
+export function preloadPython() {
+  engine.start();
+}
+
+/**
+ * @returns {{
+ *   status: 'idle' | 'loading' | 'ready' | 'error',
+ *   runCode: (code: string, hiddenTests?: string, options?: {timeoutMs?: number}) => Promise<object>,
+ *   cancel: () => void,   // остановить выполняющийся код
+ *   retry: () => void,    // попробовать загрузить Python ещё раз после ошибки
+ * }}
+ * Результат runCode: { status: 'ok' | 'test_failed' | 'runtime_error' | 'timeout' | 'cancelled',
+ *                      passed, output, error, durationMs } — подробности в pythonRunner.js.
+ */
 export function usePyodide() {
-  const [status, setStatus] = useState('idle'); // idle | loading | ready | error
-  const runnerRef = useRef(null);
+  const status = useSyncExternalStore(engine.subscribe, engine.getStatus);
 
-  useEffect(() => {
-    let cancelled = false;
-    setStatus('loading');
+  useEffect(() => { engine.start(); }, []);
 
-    async function load() {
-      try {
-        // loadPyodide подключается через <script> в public/index.html
-        const pyodide = await window.loadPyodide({ indexURL: PYODIDE_URL });
-        if (!cancelled) {
-          runnerRef.current = createRunner(pyodide);
-          setStatus('ready');
-        }
-      } catch (e) {
-        console.error('Не удалось загрузить Pyodide:', e);
-        if (!cancelled) setStatus('error');
-      }
-    }
+  const runCode = useCallback((code, hiddenTests = '', options) => engine.run(code, hiddenTests, options), []);
+  const cancel = useCallback(() => engine.cancel(), []);
+  const retry = useCallback(() => engine.start(), []);
 
-    load();
-    return () => { cancelled = true; };
-  }, []);
-
-  /**
-   * Выполняет код студента (и, если переданы, скрытые тесты) локально в Pyodide.
-   * Возвращает { status, passed, output, error, durationMs } — см. pythonRunner.js.
-   * Вердикт `passed` определяется результатом выполнения, а не текстом в stdout.
-   */
-  const runCode = useCallback(async (studentCode, hiddenTests = '') => {
-    if (!runnerRef.current) {
-      return { status: 'runtime_error', passed: false, output: '', error: 'Pyodide не готов', durationMs: 0 };
-    }
-    return runnerRef.current(studentCode, hiddenTests);
-  }, []);
-
-  return { status, runCode };
+  return { status, runCode, cancel, retry };
 }
