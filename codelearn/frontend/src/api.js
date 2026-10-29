@@ -56,6 +56,12 @@ export const api = {
     request('/courses', { method: 'POST', body: { title, description, language } }),
   joinCourse: (code) => request('/courses/join', { method: 'POST', body: { code } }),
   getCourseTasks: (courseId) => request(`/courses/${courseId}/tasks`),
+  // Управление курсом (только владелец)
+  getCourseStats: (id) => request(`/courses/${id}/stats`),
+  updateCourse: (id, data) => request(`/courses/${id}`, { method: 'PUT', body: data }),
+  // Сервер сам сверяет введённое название с настоящим — защита не зависит от интерфейса
+  deleteCourse: (id, confirmTitle) => request(`/courses/${id}`, { method: 'DELETE', body: { confirmTitle } }),
+  regenerateAccessCode: (id) => request(`/courses/${id}/access-code`, { method: 'POST' }),
   addCourseTask: (courseId, task) =>
     request(`/courses/${courseId}/tasks`, { method: 'POST', body: task }),
 

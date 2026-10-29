@@ -93,3 +93,10 @@
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); animation: ctToast 0.25s ease;
 }
 @keyframes ctToast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.ctasks-owner-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ctasks-manage-btn {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 18px; font-size: 13px; font-weight: 600; transition: all 0.2s;
+}
+.ctasks-manage-btn:hover { border-color: var(--accent); color: var(--accent2); }

@@ -6,7 +6,7 @@ import './CourseTasksPage.css';
 const DIFF_LABEL = { easy: 'лёгкая', medium: 'средняя', hard: 'сложная' };
 const DIFF_COLOR = { easy: '#34d399', medium: '#fbbf24', hard: '#f87171' };
 
-export default function CourseTasksPage({ courseId, courseTitle, onSelectTask, onBack }) {
+export default function CourseTasksPage({ courseId, courseTitle, onSelectTask, onManage, onBack }) {
   const [tasks, setTasks] = useState([]);
   const [solved, setSolved] = useState([]);
   const [isOwner, setIsOwner] = useState(false);
@@ -84,7 +84,10 @@ export default function CourseTasksPage({ courseId, courseTitle, onSelectTask, o
             {isOwner && <div className="ctasks-owner-badge">Вы владелец курса</div>}
           </div>
           {isOwner && (
-            <button className="ctasks-add-btn" onClick={() => setModal({ taskId: null })}>+ Добавить задачу</button>
+            <div className="ctasks-owner-actions">
+              <button className="ctasks-manage-btn" onClick={onManage}>⚙ Управление курсом</button>
+              <button className="ctasks-add-btn" onClick={() => setModal({ taskId: null })}>+ Добавить задачу</button>
+            </div>
           )}
         </div>
 

@@ -382,39 +382,311 @@ func handleGetCourses(w http.ResponseWriter, r *http.Request) {
 // POST /api/courses
 func handleCreateCourse(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
-	var body struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Language    string `json:"language"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Title == "" {
-		jsonError(w, "Укажите название курса", http.StatusBadRequest)
+	in, ok := readCourseInput(w, r, true)
+	if !ok {
 		return
 	}
-	if body.Language == "" {
-		body.Language = "python"
+	code, err := uniqueAccessCode()
+	if err != nil {
+		jsonError(w, "Не удалось создать код доступа, повторите попытку", http.StatusInternalServerError)
+		return
 	}
-	var code string
-	for {
-		code = generateAccessCode()
-		var exists bool
-		db.QueryRow(`SELECT EXISTS(SELECT 1 FROM courses WHERE access_code=$1)`, code).Scan(&exists)
-		if !exists {
-			break
-		}
+
+	tx, err := db.Begin()
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
 	}
+	defer tx.Rollback()
+
 	var courseID int
-	err := db.QueryRow(`
+	err = tx.QueryRow(`
 		INSERT INTO courses (title, description, language, access_code, owner_id)
 		VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		body.Title, body.Description, body.Language, code, uid,
+		in.Title, in.Description, in.Language, code, uid,
 	).Scan(&courseID)
+	if err == nil {
+		_, err = tx.Exec(`INSERT INTO course_enrollments (user_id, course_id) VALUES ($1,$2)`, uid, courseID)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
+		log.Printf("создание курса: %v", err)
 		jsonError(w, "Ошибка создания курса", http.StatusInternalServerError)
 		return
 	}
-	db.Exec(`INSERT INTO course_enrollments (user_id, course_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, uid, courseID)
 	jsonOK(w, map[string]any{"id": courseID, "accessCode": code, "message": "Курс создан"})
+}
+
+// ─── Управление курсом (только владелец) ─────────────────────────────────────
+
+const maxCourseDesc = 2000
+
+type CourseInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Language    string `json:"language"`
+}
+
+// normalize возвращает текст ошибки ("" если всё хорошо). Язык проверяется только при создании:
+// у существующего курса он не меняется, потому что к нему привязаны тесты задач.
+func (c *CourseInput) normalize(checkLang bool) string {
+	c.Title = strings.TrimSpace(c.Title)
+	c.Description = strings.TrimSpace(c.Description)
+	switch {
+	case c.Title == "":
+		return "Укажите название курса"
+	case utf8.RuneCountInString(c.Title) > 200:
+		return "Название не длиннее 200 символов"
+	case utf8.RuneCountInString(c.Description) > maxCourseDesc:
+		return "Описание — не более 2000 символов"
+	}
+	if checkLang {
+		if c.Language == "" {
+			c.Language = "python"
+		}
+		if c.Language != "python" && c.Language != "javascript" && c.Language != "ruby" {
+			return "Язык: python, javascript или ruby"
+		}
+	}
+	return ""
+}
+
+func readCourseInput(w http.ResponseWriter, r *http.Request, checkLang bool) (CourseInput, bool) {
+	var in CourseInput
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<17)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		jsonError(w, "Неверный запрос", http.StatusBadRequest)
+		return in, false
+	}
+	if msg := in.normalize(checkLang); msg != "" {
+		jsonError(w, msg, http.StatusBadRequest)
+		return in, false
+	}
+	return in, true
+}
+
+// requireCourseOwner: курс существует и пользователь — его владелец. Возвращает название курса.
+func requireCourseOwner(w http.ResponseWriter, r *http.Request, courseID int) (string, bool) {
+	var ownerID sql.NullInt64
+	var title string
+	err := db.QueryRow(`SELECT owner_id, title FROM courses WHERE id=$1`, courseID).Scan(&ownerID, &title)
+	switch {
+	case err == sql.ErrNoRows:
+		jsonError(w, "Курс не найден", http.StatusNotFound)
+	case err != nil:
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+	case !ownerID.Valid || int(ownerID.Int64) != getUserID(r):
+		jsonError(w, "Управлять курсом может только его владелец", http.StatusForbidden)
+	default:
+		return title, true
+	}
+	return "", false
+}
+
+// uniqueAccessCode подбирает код, которого ещё нет ни у одного курса.
+func uniqueAccessCode() (string, error) {
+	for i := 0; i < 10; i++ {
+		code := generateAccessCode()
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM courses WHERE access_code=$1)`, code).Scan(&exists); err != nil {
+			return "", err
+		}
+		if !exists {
+			return code, nil
+		}
+	}
+	return "", fmt.Errorf("не удалось подобрать уникальный код доступа")
+}
+
+// PUT /api/courses/:id — название и описание
+func handleUpdateCourse(w http.ResponseWriter, r *http.Request) {
+	id := courseIDFromPath(r.URL.Path, "")
+	if _, ok := requireCourseOwner(w, r, id); !ok {
+		return
+	}
+	in, ok := readCourseInput(w, r, false)
+	if !ok {
+		return
+	}
+	if _, err := db.Exec(`UPDATE courses SET title=$1, description=$2 WHERE id=$3`, in.Title, in.Description, id); err != nil {
+		log.Printf("изменение курса %d: %v", id, err)
+		jsonError(w, "Не удалось сохранить изменения", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{
+		"message": "Курс обновлён",
+		"course":  map[string]any{"id": id, "title": in.Title, "description": in.Description},
+	})
+}
+
+// DELETE /api/courses/:id — вместе с задачами, тестами, записями участников и их прогрессом.
+// Сервер сам проверяет введённое название: защита не должна зависеть от интерфейса.
+func handleDeleteCourse(w http.ResponseWriter, r *http.Request) {
+	id := courseIDFromPath(r.URL.Path, "")
+	title, ok := requireCourseOwner(w, r, id)
+	if !ok {
+		return
+	}
+	var body struct {
+		ConfirmTitle string `json:"confirmTitle"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
+		strings.TrimSpace(body.ConfirmTitle) != strings.TrimSpace(title) {
+		jsonError(w, "Название курса введено неверно", http.StatusBadRequest)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	// Задачи удаляем явно: так работает и в базах, где у tasks.course_id нет ON DELETE CASCADE
+	_, err = tx.Exec(`DELETE FROM tasks WHERE course_id=$1`, id)
+	if err == nil {
+		_, err = tx.Exec(`DELETE FROM courses WHERE id=$1`, id)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("удаление курса %d: %v", id, err)
+		jsonError(w, "Не удалось удалить курс", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{"message": "Курс удалён"})
+}
+
+// POST /api/courses/:id/access-code — новый код; старый перестаёт работать,
+// уже вступившие участники остаются в курсе.
+func handleRegenerateAccessCode(w http.ResponseWriter, r *http.Request) {
+	id := courseIDFromPath(r.URL.Path, "/access-code")
+	if _, ok := requireCourseOwner(w, r, id); !ok {
+		return
+	}
+	code, err := uniqueAccessCode()
+	if err == nil {
+		_, err = db.Exec(`UPDATE courses SET access_code=$1 WHERE id=$2`, code, id)
+	}
+	if err != nil {
+		log.Printf("новый код курса %d: %v", id, err)
+		jsonError(w, "Не удалось обновить код доступа", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{"accessCode": code, "message": "Код доступа обновлён"})
+}
+
+type MemberStat struct {
+	UserID       int        `json:"userId"`
+	Username     string     `json:"username"`
+	EnrolledAt   *time.Time `json:"enrolledAt"`
+	SolvedCount  int        `json:"solvedCount"`
+	LastActiveAt *time.Time `json:"lastActiveAt"`
+}
+
+type TaskStat struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Difficulty  string `json:"difficulty"`
+	SolvedCount int    `json:"solvedCount"`
+}
+
+// GET /api/courses/:id/stats — участники и их прогресс (владелец в статистику не входит)
+func handleCourseStats(w http.ResponseWriter, r *http.Request) {
+	uid := getUserID(r)
+	id := courseIDFromPath(r.URL.Path, "/stats")
+	if _, ok := requireCourseOwner(w, r, id); !ok {
+		return
+	}
+
+	var title, description, language, accessCode string
+	if err := db.QueryRow(`
+		SELECT title, COALESCE(description,''), COALESCE(language,'python'), COALESCE(access_code,'')
+		FROM courses WHERE id=$1`, id).Scan(&title, &description, &language, &accessCode); err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
+	}
+
+	// Задачи и сколько участников решили каждую
+	tasks := []TaskStat{}
+	trows, err := db.Query(`
+		SELECT t.id, t.title, t.difficulty, COUNT(m.user_id)
+		FROM tasks t
+		LEFT JOIN user_progress up ON up.task_id = t.id
+		LEFT JOIN course_enrollments m
+		       ON m.user_id = up.user_id AND m.course_id = t.course_id AND m.user_id <> $2
+		WHERE t.course_id = $1
+		GROUP BY t.id, t.title, t.difficulty
+		ORDER BY t.id`, id, uid)
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var t TaskStat
+		trows.Scan(&t.ID, &t.Title, &t.Difficulty, &t.SolvedCount)
+		tasks = append(tasks, t)
+	}
+
+	// Участники: сколько задач курса решил каждый и когда был активен последний раз
+	members := []MemberStat{}
+	mrows, err := db.Query(`
+		SELECT u.id, u.username, ce.enrolled_at, COUNT(up.task_id), MAX(up.solved_at)
+		FROM course_enrollments ce
+		JOIN users u ON u.id = ce.user_id
+		LEFT JOIN tasks t ON t.course_id = ce.course_id
+		LEFT JOIN user_progress up ON up.task_id = t.id AND up.user_id = ce.user_id
+		WHERE ce.course_id = $1 AND ce.user_id <> $2
+		GROUP BY u.id, u.username, ce.enrolled_at
+		ORDER BY COUNT(up.task_id) DESC, u.username`, id, uid)
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
+	}
+	defer mrows.Close()
+	for mrows.Next() {
+		var m MemberStat
+		var enrolled, last sql.NullTime
+		mrows.Scan(&m.UserID, &m.Username, &enrolled, &m.SolvedCount, &last)
+		if enrolled.Valid {
+			m.EnrolledAt = &enrolled.Time
+		}
+		if last.Valid {
+			m.LastActiveAt = &last.Time
+		}
+		members = append(members, m)
+	}
+
+	totalTasks := len(tasks)
+	completed, solvedSum := 0, 0
+	for _, m := range members {
+		solvedSum += m.SolvedCount
+		if totalTasks > 0 && m.SolvedCount >= totalTasks {
+			completed++
+		}
+	}
+	avg := 0
+	if totalTasks > 0 && len(members) > 0 {
+		avg = int(float64(solvedSum)/float64(totalTasks*len(members))*100 + 0.5)
+	}
+
+	jsonOK(w, map[string]any{
+		"course": map[string]any{
+			"id": id, "title": title, "description": description,
+			"language": language, "accessCode": accessCode,
+		},
+		"totalTasks": totalTasks,
+		"members":    members,
+		"tasks":      tasks,
+		"summary": map[string]any{
+			"memberCount": len(members), "avgProgress": avg, "completedCount": completed,
+		},
+	})
 }
 
 // POST /api/courses/join
@@ -933,6 +1205,14 @@ func router() http.Handler {
 			handleGetCourseTasks(w, r)
 		case strings.HasSuffix(path, "/tasks") && r.Method == http.MethodPost:
 			handleAddCourseTask(w, r)
+		case strings.HasSuffix(path, "/stats") && r.Method == http.MethodGet:
+			handleCourseStats(w, r)
+		case strings.HasSuffix(path, "/access-code") && r.Method == http.MethodPost:
+			handleRegenerateAccessCode(w, r)
+		case r.Method == http.MethodPut:
+			handleUpdateCourse(w, r)
+		case r.Method == http.MethodDelete:
+			handleDeleteCourse(w, r)
 		default:
 			jsonError(w, "Не найдено", http.StatusNotFound)
 		}
