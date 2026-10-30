@@ -107,6 +107,7 @@ type Task struct {
 	Difficulty  string `json:"difficulty"`
 	Topic       string `json:"topic"`
 	CourseID    int    `json:"courseId"`
+	Language    string `json:"language,omitempty"` // язык курса: определяет, чем выполняется код
 }
 
 type Example struct {
@@ -981,9 +982,11 @@ func handleGetTaskFull(w http.ResponseWriter, r *http.Request) {
 
 	var t Task
 	err := db.QueryRow(`
-		SELECT id, title, description, starter_code, difficulty, COALESCE(topic,''), COALESCE(course_id,0)
-		FROM tasks WHERE id=$1`, id,
-	).Scan(&t.ID, &t.Title, &t.Description, &t.StarterCode, &t.Difficulty, &t.Topic, &t.CourseID)
+		SELECT t.id, t.title, t.description, t.starter_code, t.difficulty,
+		       COALESCE(t.topic,''), COALESCE(t.course_id,0), COALESCE(c.language,'python')
+		FROM tasks t LEFT JOIN courses c ON c.id = t.course_id
+		WHERE t.id=$1`, id,
+	).Scan(&t.ID, &t.Title, &t.Description, &t.StarterCode, &t.Difficulty, &t.Topic, &t.CourseID, &t.Language)
 	if err != nil {
 		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
 		return
@@ -1077,12 +1080,17 @@ func handleGetTask(w http.ResponseWriter, r *http.Request) {
 	}
 	var t Task
 	err := db.QueryRow(`
-		SELECT id, title, description, starter_code, difficulty,
-		       COALESCE(topic,''), COALESCE(course_id,0)
-		FROM tasks WHERE id=$1`, id,
-	).Scan(&t.ID, &t.Title, &t.Description, &t.StarterCode, &t.Difficulty, &t.Topic, &t.CourseID)
+		SELECT t.id, t.title, t.description, t.starter_code, t.difficulty,
+		       COALESCE(t.topic,''), COALESCE(t.course_id,0), COALESCE(c.language,'python')
+		FROM tasks t LEFT JOIN courses c ON c.id = t.course_id
+		WHERE t.id=$1`, id,
+	).Scan(&t.ID, &t.Title, &t.Description, &t.StarterCode, &t.Difficulty, &t.Topic, &t.CourseID, &t.Language)
 	if err == sql.ErrNoRows {
 		jsonError(w, "Задача не найдена", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, t)

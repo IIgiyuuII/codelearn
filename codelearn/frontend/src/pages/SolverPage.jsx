@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { api } from '../api';
-import { usePyodide } from '../hooks/usePyodide';
+import { useCodeEngine, LANGUAGE_NAMES } from '../hooks/useCodeEngine';
 import './SolverPage.css';
 
 export default function SolverPage({ taskId, onBack }) {
@@ -22,7 +22,10 @@ export default function SolverPage({ taskId, onBack }) {
   const isDragging = useRef(false);
   const splitContainerRef = useRef(null);
 
-  const { status: pyStatus, runCode, cancel, retry } = usePyodide();
+  // Язык задачи = язык её курса. Пока задача не загрузилась, движок не выбирается (ничего не грузим зря)
+  const language = task ? (task.language || 'python') : null;
+  const langName = LANGUAGE_NAMES[language] || language;
+  const { status: pyStatus, runCode, cancel, retry } = useCodeEngine(language);
   const toastTimer = useRef(null);
   const editorRef = useRef(null);
 
@@ -231,9 +234,10 @@ export default function SolverPage({ taskId, onBack }) {
         <div className="solver-wasm-info">
           <div className={`solver-wasm-dot ${pyStatus}`} />
           <span>
-            {pyStatus === 'loading' && 'Загрузка Python (WASM)...'}
-            {pyStatus === 'ready' && 'Python готов · WASM'}
-            {pyStatus === 'error' && 'Ошибка загрузки Python'}
+            {pyStatus === 'loading' && (language === 'python' ? 'Загрузка Python (WASM)...' : `Запуск ${langName}...`)}
+            {pyStatus === 'ready' && (language === 'python' ? 'Python готов · WASM' : `${langName} готов · Web Worker`)}
+            {pyStatus === 'error' && `Ошибка загрузки ${langName}`}
+            {pyStatus === 'unsupported' && `Запуск ${langName} пока не поддерживается`}
           </span>
           {pyStatus === 'error' && (
             <button className="solver-btn-reset" onClick={retry}>повторить</button>
@@ -247,7 +251,7 @@ export default function SolverPage({ taskId, onBack }) {
         {/* ── Верхняя часть: редактор ── */}
         <div className="solver-editor-wrap" style={{ height: `${splitPct}%` }}>
           <div className="solver-editor-header">
-            <span className="solver-lang-badge">Python 3</span>
+            <span className="solver-lang-badge">{language === 'python' ? 'Python 3' : langName}</span>
             <div className="solver-editor-actions">
               {iconState !== 'none' && (
                 <div className="output-popover-anchor">
@@ -269,7 +273,7 @@ export default function SolverPage({ taskId, onBack }) {
                         {output?.passed === null && !output?.isError && '› Вывод программы'}
                       </span>
                       <div className="output-popover-meta">
-                        <span>{output?.durationMs}мс · WASM</span>
+                        <span>{output?.durationMs}мс · {language === 'python' ? 'WASM' : 'Worker'}</span>
                         <button className="output-popover-close" onClick={() => setOutputOpen(false)}>✕</button>
                       </div>
                     </div>
@@ -283,7 +287,7 @@ export default function SolverPage({ taskId, onBack }) {
 
           <Editor
             height="100%"
-            language="python"
+            language={{ python: 'python', javascript: 'javascript', ruby: 'ruby' }[language] || 'plaintext'}
             theme="vs-dark"
             value={code}
             onChange={v => setCode(v || '')}

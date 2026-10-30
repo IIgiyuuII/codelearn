@@ -1,12 +1,14 @@
-// Единый Python-движок приложения.
+// Движок выполнения кода: один экземпляр на язык (Python, JavaScript).
 //
-// • Pyodide загружается ОДИН раз и живёт в отдельном Web Worker (создаётся лениво, при start()).
+// • Код выполняется в отдельном Web Worker (создаётся лениво, при start()), поэтому интерфейс
+//   не замирает, а зависший код можно убить.
 // • Зависший код (бесконечный цикл) останавливается по таймауту или кнопкой «Стоп»:
-//   воркер уничтожается (Worker.terminate), а новый сразу поднимается в фоне — к следующему
-//   запуску он, как правило, уже готов. Прерывание через SharedArrayBuffer не используется:
-//   оно требует заголовков COOP/COEP, а они усложняют хостинг.
-// • Запуски идут строго по очереди. Таймаут отсчитывается от начала выполнения, а не от
-//   загрузки Python.
+//   воркер уничтожается (Worker.terminate), а новый сразу поднимается в фоне. Прерывание через
+//   SharedArrayBuffer не используется: оно требует заголовков COOP/COEP, а они усложняют хостинг.
+// • Запуски идут строго по очереди. Таймаут отсчитывается от начала выполнения, а не от загрузки.
+// • Режим recycle: после КАЖДОГО запуска воркер заменяется новым. Для лёгких движков (JavaScript)
+//   это даёт полную изоляцию запусков — глобальные переменные, таймеры и изменённые прототипы
+//   не переживают запуск, — а стоит десятки миллисекунд. Для Pyodide (секунды) не используется.
 //
 // Класс не зависит от браузера: воркер создаёт переданная фабрика (в тестах — на worker_threads).
 
@@ -16,14 +18,17 @@ const failure = (error, status = 'runtime_error') => ({
   status, passed: false, output: '', error, durationMs: 0,
 });
 
-export class PythonEngine {
+export class WorkerEngine {
   /**
    * @param {() => {postMessage, terminate, onmessage, onerror}} createWorker
-   * @param {{timeoutMs?: number}} [options]
+   * @param {{timeoutMs?: number, label?: string, recycle?: boolean}} [options]
+   *   label — название языка для сообщений об ошибках; recycle — менять воркер после каждого запуска
    */
-  constructor(createWorker, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  constructor(createWorker, { timeoutMs = DEFAULT_TIMEOUT_MS, label = 'Python', recycle = false } = {}) {
     this._createWorker = createWorker;
     this._timeoutMs = timeoutMs;
+    this._label = label;
+    this._recycle = recycle;
     this._worker = null;
     this._status = 'idle'; // idle | loading | ready | error
     this._listeners = new Set();
@@ -74,8 +79,10 @@ export class PythonEngine {
     this._listeners.forEach(listener => listener());
   }
 
-  _spawn() {
-    this._setStatus('loading');
+  // silent: не переводить статус в loading — так заменяют работающий воркер у recycle-движков,
+  // чтобы интерфейс не мигал; следующий запуск просто дождётся нового воркера.
+  _spawn(silent = false) {
+    if (!silent) this._setStatus('loading');
     let resolveReady;
     let rejectReady;
     this._ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
@@ -134,6 +141,10 @@ export class PythonEngine {
     if (!current || current.id !== id) return;
     clearTimeout(current.timer);
     this._current = null;
+    if (this._recycle) {
+      this._kill();
+      this._spawn(true);
+    }
     current.resolve(result);
   }
 
@@ -144,7 +155,7 @@ export class PythonEngine {
     clearTimeout(current.timer);
     this._current = null;
     this._kill();
-    if (respawn) this._spawn();
+    if (respawn) this._spawn(this._recycle);
     current.resolve({
       status, passed: false, output: '', error,
       durationMs: Math.round(performance.now() - current.started),
@@ -156,7 +167,7 @@ export class PythonEngine {
     const text = `Выполнение аварийно завершено (${message}). Возможно, не хватило памяти.`;
     if (!this._abortCurrent('runtime_error', text)) {
       this._kill();
-      this._spawn();
+      this._spawn(this._recycle);
     }
   }
 
@@ -166,10 +177,10 @@ export class PythonEngine {
       try {
         await this._ready;
       } catch (e) {
-        return failure(`Не удалось загрузить Python: ${e.message}`);
+        return failure(`Не удалось загрузить ${this._label}: ${e.message}`);
       }
       if (this._status === 'ready' && this._worker) break;
-      if (attempt >= 2) return failure('Python недоступен, попробуйте ещё раз');
+      if (attempt >= 2) return failure(`${this._label} недоступен, попробуйте ещё раз`);
     }
 
     return new Promise(resolve => {

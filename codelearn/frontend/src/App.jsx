@@ -5,7 +5,7 @@ import CourseTasksPage from './pages/CourseTasksPage';
 import CourseManagePage from './pages/CourseManagePage';
 import SolverPage from './pages/SolverPage';
 import ProfilePage from './pages/ProfilePage';
-import { preloadPython } from './hooks/usePyodide';
+import { preloadPython } from './hooks/useCodeEngine';
 
 export default function App() {
   const [page, setPage] = useState('auth');

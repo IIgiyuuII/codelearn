@@ -1,16 +1,42 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api';
-import { usePyodide } from '../hooks/usePyodide';
+import { useCodeEngine, SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from '../hooks/useCodeEngine';
 import './TaskFormModal.css';
 
-const EMPTY_FORM = {
+// Всё, что отличается у разных языков: заготовка кода, подсказки, формат тестов
+const LANG_UI = {
+  python: {
+    starter: 'def solve():\n    # Ваш код здесь\n    pass\n',
+    reference: 'def solve(...):\n    ...',
+    tests: 'assert sum(2, 3) == 5\nassert sum(0, 0) == 0\nassert sum(-1, 1) == 0, "сумма -1 и 1 должна быть 0"',
+    testsHint: (
+      <>Обычный Python с <code>assert</code>: функции студента уже определены. Текст после запятой
+      в <code>assert</code> студент увидит как подсказку. Строка <code>print(...)</code> в конце не нужна.</>
+    ),
+    exampleInput: 'sum(2, 3)',
+  },
+  javascript: {
+    starter: 'function solve() {\n  // Ваш код здесь\n}\n',
+    reference: 'function solve(...) {\n  ...\n}',
+    tests: 'assertEqual(sum(2, 3), 5);\nassertEqual(sum(0, 0), 0);\nassertEqual(sum(-1, 1), 0, "сумма -1 и 1 должна быть 0");',
+    testsHint: (
+      <>Обычный JavaScript: функции и переменные студента уже определены. Доступны <code>assertEqual(факт, ожидание, сообщение)</code> (сравнивает
+      и массивы с объектами), <code>assertNotEqual</code>, <code>assert(условие, сообщение)</code> и <code>assertThrows(функция)</code>. Сообщение студент увидит как подсказку.
+      Можно использовать <code>await</code>.</>
+    ),
+    exampleInput: 'sum(2, 3)',
+  },
+};
+const FALLBACK_UI = LANG_UI.python;
+
+const emptyForm = language => ({
   title: '',
   topic: 'Общее',
   difficulty: 'easy',
   description: '',
-  starterCode: 'def solve():\n    # Ваш код здесь\n    pass\n',
+  starterCode: (LANG_UI[language] || FALLBACK_UI).starter,
   hiddenTests: '',
-};
+});
 const EMPTY_EXAMPLE = { input: '', output: '', explanation: '' };
 
 // Tab в полях с кодом вставляет 4 пробела, а не уводит фокус
@@ -23,10 +49,10 @@ function handleTab(e, setValue) {
   requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + 4; });
 }
 
-// Проверка скрытых тестов на эталонном решении. Pyodide грузится только когда эта
-// секция показана, то есть только для курсов на Python.
-function ReferenceCheck({ reference, onReferenceChange, tests, starterCode, check, onCheck }) {
-  const { status, runCode } = usePyodide();
+// Проверка скрытых тестов на эталонном решении. Движок языка запускается только когда эта
+// секция показана, то есть для курсов на поддерживаемых языках.
+function ReferenceCheck({ language, reference, onReferenceChange, tests, starterCode, check, onCheck }) {
+  const { status, runCode } = useCodeEngine(language);
   const [running, setRunning] = useState(false);
 
   const canRun = status === 'ready' && !running && reference.trim() && tests.trim();
@@ -57,7 +83,7 @@ function ReferenceCheck({ reference, onReferenceChange, tests, starterCode, chec
         value={reference}
         onChange={e => onReferenceChange(e.target.value)}
         onKeyDown={e => handleTab(e, onReferenceChange)}
-        placeholder={'def solve(...):\n    ...'}
+        placeholder={(LANG_UI[language] || FALLBACK_UI).reference}
         spellCheck={false}
       />
       <div className="tf-check-row">
@@ -65,8 +91,8 @@ function ReferenceCheck({ reference, onReferenceChange, tests, starterCode, chec
           {running ? 'Проверяю…' : '▶ Проверить тесты на эталоне'}
         </button>
         <span className="tf-hint">
-          {status === 'loading' && 'Python загружается…'}
-          {status === 'error' && 'Не удалось загрузить Python'}
+          {status === 'loading' && `${LANGUAGE_NAMES[language]} загружается…`}
+          {status === 'error' && `Не удалось загрузить ${LANGUAGE_NAMES[language]}`}
           {status === 'ready' && !reference.trim() && 'Вставьте решение, чтобы убедиться, что тесты верны'}
         </span>
       </div>
@@ -77,11 +103,12 @@ function ReferenceCheck({ reference, onReferenceChange, tests, starterCode, chec
 
 export default function TaskFormModal({ courseId, language, taskId, onClose, onSaved }) {
   const isEdit = taskId != null;
-  const isPython = language === 'python';
+  const canRun = SUPPORTED_LANGUAGES.includes(language);
+  const ui = LANG_UI[language] || FALLBACK_UI;
 
   const [loading, setLoading] = useState(isEdit);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState(() => emptyForm(language));
   const [examples, setExamples] = useState([{ ...EMPTY_EXAMPLE }]);
   const [reference, setReference] = useState('');
   const [check, setCheck] = useState(null); // null | { kind: 'ok' | 'warn' | 'fail', text }
@@ -137,7 +164,7 @@ export default function TaskFormModal({ courseId, language, taskId, onClose, onS
     if (!form.hiddenTests.trim()) return 'Добавьте скрытые тесты — без них задачу нельзя проверить';
     const half = examples.find(e => (e.input.trim() === '') !== (e.output.trim() === ''));
     if (half) return 'В каждом примере нужны и входные данные, и ожидаемый результат';
-    if (isPython && reference.trim() && !(check && check.kind !== 'fail')) {
+    if (canRun && reference.trim() && !(check && check.kind !== 'fail')) {
       return 'Проверьте тесты на эталонном решении — или очистите поле эталона';
     }
     return '';
@@ -176,10 +203,10 @@ export default function TaskFormModal({ courseId, language, taskId, onClose, onS
         ) : (
           <form onSubmit={handleSave} className="tf-form">
             <div className="tf-body">
-              {!isPython && (
+              {!canRun && (
                 <div className="tf-notice">
-                  Язык курса — {language}. Запуск кода пока поддерживается только для Python: задачу можно
-                  создать, но решать её студенты смогут после добавления этого языка.
+                  Язык курса — {LANGUAGE_NAMES[language] || language}. Запуск кода пока поддерживается только для
+                  Python и JavaScript: задачу можно создать, но решать её студенты смогут после добавления этого языка.
                 </div>
               )}
 
@@ -219,7 +246,7 @@ export default function TaskFormModal({ courseId, language, taskId, onClose, onS
                 <div className="tf-examples">
                   {examples.map((ex, i) => (
                     <div className="tf-example" key={i}>
-                      <input className="tf-mono" value={ex.input} placeholder="sum(2, 3)"
+                      <input className="tf-mono" value={ex.input} placeholder={ui.exampleInput}
                         onChange={e => updateExample(i, 'input', e.target.value)} />
                       <span className="tf-arrow">→</span>
                       <input className="tf-mono" value={ex.output} placeholder="5"
@@ -239,15 +266,13 @@ export default function TaskFormModal({ courseId, language, taskId, onClose, onS
                 <label>Скрытые тесты</label>
                 <textarea className="tf-code" rows={7} value={form.hiddenTests}
                   onChange={onText('hiddenTests')} onKeyDown={e => handleTab(e, setTests)} spellCheck={false}
-                  placeholder={'assert sum(2, 3) == 5\nassert sum(0, 0) == 0\nassert sum(-1, 1) == 0, "сумма -1 и 1 должна быть 0"'} />
-                <div className="tf-hint">
-                  Обычный Python с <code>assert</code>: функции студента уже определены. Текст после запятой
-                  в <code>assert</code> студент увидит как подсказку. Строка <code>print(...)</code> в конце не нужна.
-                </div>
+                  placeholder={ui.tests} />
+                <div className="tf-hint">{ui.testsHint}</div>
               </div>
 
-              {isPython && (
+              {canRun && (
                 <ReferenceCheck
+                  language={language}
                   reference={reference} onReferenceChange={setRef}
                   tests={form.hiddenTests} starterCode={form.starterCode}
                   check={check} onCheck={setCheck}
