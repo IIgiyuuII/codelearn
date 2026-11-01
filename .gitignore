@@ -6,8 +6,10 @@
 node_modules/
 vendor/
 
-# Сборка
+# Сборка и отчёты тестов
 build/
+coverage/
+.build/
 
 # Бинарные файлы Go
 *.exe

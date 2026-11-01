@@ -23,6 +23,7 @@ export default function ProfilePage({ username, onBack }) {
   const [createForm, setCreateForm] = useState({ title: '', description: '', language: 'python' });
   const [creating, setCreating] = useState(false);
   const [createResult, setCreateResult] = useState(null); // { accessCode }
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -38,11 +39,15 @@ export default function ProfilePage({ username, onBack }) {
     e.preventDefault();
     if (!createForm.title.trim()) return;
     setCreating(true);
+    setCreateError('');
     const data = await api.createCourse(createForm.title, createForm.description, createForm.language);
     if (data.accessCode) {
       setCreateResult(data);
       setCreateForm({ title: '', description: '', language: 'python' });
       load();
+    } else {
+      // раньше при отказе сервера (например, слишком длинное название) не происходило ничего
+      setCreateError(data.error || 'Не удалось создать курс');
     }
     setCreating(false);
   }
@@ -89,7 +94,7 @@ export default function ProfilePage({ username, onBack }) {
         {/* Кнопка создать курс */}
         <div className="profile-section-header">
           <div className="profile-section-title">Мои курсы</div>
-          <button className="profile-create-btn" onClick={() => { setShowCreate(!showCreate); setCreateResult(null); }}>
+          <button className="profile-create-btn" onClick={() => { setShowCreate(!showCreate); setCreateResult(null); setCreateError(''); }}>
             {showCreate ? '✕ Отмена' : '+ Создать курс'}
           </button>
         </div>
@@ -136,6 +141,7 @@ export default function ProfilePage({ username, onBack }) {
                     <option value="ruby">Ruby 💎</option>
                   </select>
                 </div>
+                {createError && <div className="profile-create-error" role="alert" style={{ color: 'var(--red)', fontSize: 13 }}>{createError}</div>}
                 <button className="profile-create-submit" type="submit" disabled={creating || !createForm.title.trim()}>
                   {creating ? 'Создаём...' : 'Создать курс'}
                 </button>

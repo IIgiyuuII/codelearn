@@ -132,15 +132,25 @@ type Course struct {
 
 var db *sql.DB
 
-func initDB(dsn string) {
-	var err error
-	db, err = sql.Open("postgres", dsn)
+// openDB открывает соединение и проверяет, что база отвечает.
+func openDB(dsn string) (*sql.DB, error) {
+	conn, err := sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatalf("❌ Ошибка подключения к БД: %v", err)
+		return nil, err
 	}
-	if err = db.Ping(); err != nil {
+	if err := conn.Ping(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func initDB(dsn string) {
+	conn, err := openDB(dsn)
+	if err != nil {
 		log.Fatalf("❌ БД недоступна: %v", err)
 	}
+	db = conn
 	log.Println("✅ Подключение к PostgreSQL успешно")
 }
 
@@ -280,15 +290,23 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Заполните все поля", http.StatusBadRequest)
 		return
 	}
+	if len(body.Password) > 72 { // ограничение bcrypt; раньше такой пароль создавал пользователя с пустым хэшем
+		jsonError(w, "Пароль не длиннее 72 байт", http.StatusBadRequest)
+		return
+	}
 	var exists bool
 	db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE username=$1)`, body.Username).Scan(&exists)
 	if exists {
 		jsonError(w, "Пользователь уже существует", http.StatusBadRequest)
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	if err != nil {
+		jsonError(w, "Не удалось обработать пароль", http.StatusInternalServerError)
+		return
+	}
 	var id int
-	err := db.QueryRow(`INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id`,
+	err = db.QueryRow(`INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id`,
 		body.Username, string(hash)).Scan(&id)
 	if err != nil {
 		jsonError(w, "Ошибка создания пользователя", http.StatusInternalServerError)
@@ -1150,37 +1168,69 @@ func handleMarkSolved(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := getUserID(r)
-	db.Exec(`INSERT INTO user_progress (user_id, task_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, userID, id)
-	rows, _ := db.Query(`SELECT task_id FROM user_progress WHERE user_id=$1`, userID)
-	defer rows.Close()
-	var solved []int
-	for rows.Next() {
-		var tid int
-		rows.Scan(&tid)
-		solved = append(solved, tid)
+	if _, err := db.Exec(`INSERT INTO user_progress (user_id, task_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, userID, id); err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
+	}
+	solved, err := solvedTaskIDs(userID)
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
 	}
 	jsonOK(w, map[string]any{"solvedTasks": solved})
+}
+
+// solvedTaskIDs — решённые задачи тех курсов, на которые пользователь записан.
+func solvedTaskIDs(userID int) ([]int, error) {
+	rows, err := db.Query(`
+		SELECT up.task_id
+		FROM user_progress up
+		JOIN tasks t ON t.id = up.task_id
+		JOIN course_enrollments ce ON ce.course_id = t.course_id AND ce.user_id = up.user_id
+		WHERE up.user_id = $1
+		ORDER BY up.task_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	solved := []int{}
+	for rows.Next() {
+		var tid int
+		if err := rows.Scan(&tid); err != nil {
+			return nil, err
+		}
+		solved = append(solved, tid)
+	}
+	return solved, rows.Err()
 }
 
 func handleProgress(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	var total int
-	db.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&total)
-	rows, _ := db.Query(`SELECT task_id FROM user_progress WHERE user_id=$1`, uid)
-	defer rows.Close()
-	var solved []int
-	for rows.Next() {
-		var tid int
-		rows.Scan(&tid)
-		solved = append(solved, tid)
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM tasks t
+		JOIN course_enrollments ce ON ce.course_id = t.course_id AND ce.user_id = $1`, uid).Scan(&total); err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
 	}
-	if solved == nil {
-		solved = []int{}
+	solved, err := solvedTaskIDs(uid)
+	if err != nil {
+		jsonError(w, "Ошибка БД", http.StatusInternalServerError)
+		return
 	}
 	jsonOK(w, map[string]any{"solved": len(solved), "total": total, "solvedTasks": solved})
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
+
+// buildHandler — маршруты API, обёрнутые в CORS.
+func buildHandler() http.Handler {
+	return cors.New(cors.Options{
+		AllowedOrigins: []string{corsOrigin},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Authorization", "Content-Type"},
+	}).Handler(router())
+}
 
 func router() http.Handler {
 	mux := http.NewServeMux()
@@ -1257,11 +1307,7 @@ func main() {
 	var courseCount int
 	db.QueryRow(`SELECT COUNT(*) FROM courses`).Scan(&courseCount)
 
-	handler := cors.New(cors.Options{
-		AllowedOrigins: []string{corsOrigin},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Authorization", "Content-Type"},
-	}).Handler(router())
+	handler := buildHandler()
 
 	addr := ":" + serverPort
 	fmt.Printf("✅ Go-бэкенд запущен: http://localhost%s\n", addr)

@@ -1,0 +1,23 @@
+{
+  "python": {
+    "Сумма двух чисел": "def sum(a, b):\n    return a + b",
+    "Факториал числа": "def factorial(n):\n    return 1 if n == 0 else n * factorial(n - 1)",
+    "Разворот строки": "def reverse_string(s):\n    return s[::-1]",
+    "Число Фибоначчи": "def fibonacci(n):\n    return n if n <= 1 else fibonacci(n - 1) + fibonacci(n - 2)",
+    "Проверка палиндрома": "def is_palindrome(s):\n    t = s.lower()\n    return t == t[::-1]",
+    "Максимум в списке": "def find_max(lst):\n    m = lst[0]\n    for x in lst:\n        if x > m:\n            m = x\n    return m"
+  },
+  "javascript": {
+    "Сумма двух чисел": "function sum(a, b) { return a + b; }",
+    "Факториал числа": "function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }",
+    "Разворот строки": "function reverseString(s) { return [...s].reverse().join(\"\"); }",
+    "Проверка палиндрома": "const isPalindrome = s => { const t = s.toLowerCase(); return t === [...t].reverse().join(\"\"); };",
+    "Максимум в массиве": "function findMax(arr) { let m = arr[0]; for (const x of arr) if (x > m) m = x; return m; }",
+    "Уникальные элементы": "const unique = arr => [...new Set(arr)];"
+  },
+  "javascriptWrong": {
+    "Максимум в массиве": ["function findMax(arr) { return Math.max(...arr); }"],
+    "Уникальные элементы": ["function unique(arr) { arr.sort(); return [...new Set(arr)]; }"],
+    "Проверка палиндрома": ["function isPalindrome(s) { return s === s.split(\"\").reverse().join(\"\"); }"]
+  }
+}

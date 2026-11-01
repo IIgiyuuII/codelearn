@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { WorkerEngine } from './workerEngine';
+import { createPythonWorker, createJavaScriptWorker } from './workerFactories';
 
 // По одному движку на язык на всё приложение. Воркеры создаются лениво — при первом start().
 const ENGINES = {
   // Pyodide тяжёлый (секунды и ~10 МБ), поэтому грузится один раз и живёт долго
-  python: new WorkerEngine(
-    () => new Worker(new URL('./pyodide.worker.js', import.meta.url)),
-    { label: 'Python' },
-  ),
+  python: new WorkerEngine(createPythonWorker, { label: 'Python' }),
   // JavaScript лёгкий: воркер заменяется после каждого запуска, и запуски полностью изолированы
-  javascript: new WorkerEngine(
-    () => new Worker(new URL('./js.worker.js', import.meta.url)),
-    { label: 'JavaScript', recycle: true, timeoutMs: 5000 },
-  ),
+  javascript: new WorkerEngine(createJavaScriptWorker, { label: 'JavaScript', recycle: true, timeoutMs: 5000 }),
 };
 
 export const SUPPORTED_LANGUAGES = Object.keys(ENGINES);
