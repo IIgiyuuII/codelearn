@@ -1,0 +1,192 @@
+# Непрерывная интеграция: на каждый push в main и на каждый pull request проверяются
+# бэкенд, фронтенд, движки выполнения кода (на настоящем Pyodide) и сборка БД в Docker.
+#
+# Файл лежит в КОРНЕ репозитория: .github/workflows/ci.yml (рядом с папкой codelearn и .gitignore).
+# Если проект лежит прямо в корне репозитория, замените в этом файле «codelearn/» на пустую строку.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# Новый коммит в ту же ветку отменяет устаревший запуск
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Бэкенд (Go + PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: codelearn/backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: codelearn_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d codelearn_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # CI=true: недоступная тестовая БД — это ошибка, а не молчаливый пропуск тестов
+      CI: "true"
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      TEST_DB_NAME: codelearn_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: codelearn/backend/go.mod
+          cache-dependency-path: codelearn/backend/go.sum
+
+      - name: Зависимости на месте и не повреждены
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Форматирование (gofmt)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Не отформатированы (запустите gofmt -w):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Статический анализ (go vet)
+        run: go vet ./...
+
+      - name: Тесты (с детектором гонок и покрытием)
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Покрытие
+        run: |
+          total="$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')"
+          echo "### Покрытие бэкенда: ${total}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: codelearn/backend/coverage.out
+          if-no-files-found: ignore
+
+  frontend:
+    name: Фронтенд (тесты и сборка)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: codelearn/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: codelearn/frontend/package-lock.json
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Тесты (Jest, с покрытием)
+        run: npm run test:ci
+
+      - name: Сборка (предупреждения линтера считаются ошибками)
+        run: npm run build
+        env:
+          CI: "true"
+
+      - name: Покрытие
+        run: |
+          {
+            echo "### Покрытие фронтенда"
+            echo '```'
+            node scripts/coverage-summary.mjs
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: codelearn/frontend/coverage/lcov.info
+          if-no-files-found: ignore
+
+  engines:
+    name: Движки Python и JavaScript (настоящий Pyodide)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: codelearn/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: codelearn/frontend/package-lock.json
+
+      - run: npm ci
+
+      # Воркеры, таймауты, «Стоп», падение по памяти, эталонные решения для демо-курсов
+      - name: Тесты движков
+        run: npm run test:engine
+
+  database:
+    name: БД в Docker (схема и начальные данные)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: codelearn
+    env:
+      DB_PASSWORD: ci-password
+      DB_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Поднять базу так, как это делает разработчик
+        run: docker compose up -d --wait
+
+      - name: Схема и начальные данные применились
+        run: |
+          q() { docker compose exec -T db psql -U postgres -d CodeLearn -Atc "$1"; }
+          [ "$(q "select count(*) from information_schema.tables where table_schema = 'public'")" = "7" ]
+          [ "$(q "select count(*) from courses where owner_id is null")" = "2" ]
+          [ "$(q "select count(*) from tasks")" = "12" ]
+          [ "$(q "select count(*) from task_hidden_tests")" = "12" ]
+          echo "схема: 7 таблиц; системных курсов: 2; задач: 12; тестов: 12"
+
+      - name: Скрипты можно запускать повторно (идемпотентность)
+        run: |
+          for script in 01-schema 02-seed 03-seed-js; do
+            docker compose exec -T db psql -U postgres -d CodeLearn -v ON_ERROR_STOP=1 -q \
+              -f "/docker-entrypoint-initdb.d/${script}.sql"
+          done
+          tasks="$(docker compose exec -T db psql -U postgres -d CodeLearn -Atc "select count(*) from tasks")"
+          [ "$tasks" = "12" ]
+
+      - name: Остановить
+        if: always()
+        run: docker compose down -v
