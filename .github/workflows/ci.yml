@@ -172,11 +172,11 @@ jobs:
       - name: Схема и начальные данные применились
         run: |
           q() { docker compose exec -T db psql -U postgres -d CodeLearn -Atc "$1"; }
-          [ "$(q "select count(*) from information_schema.tables where table_schema = 'public'")" = "7" ]
+          [ "$(q "select count(*) from information_schema.tables where table_schema = 'public'")" = "8" ]
           [ "$(q "select count(*) from courses where owner_id is null")" = "2" ]
           [ "$(q "select count(*) from tasks")" = "12" ]
           [ "$(q "select count(*) from task_hidden_tests")" = "12" ]
-          echo "схема: 7 таблиц; системных курсов: 2; задач: 12; тестов: 12"
+          echo "схема: 8 таблиц; системных курсов: 2; задач: 12; тестов: 12"
 
       - name: Скрипты можно запускать повторно (идемпотентность)
         run: |

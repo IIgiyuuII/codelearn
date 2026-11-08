@@ -16,8 +16,8 @@ func TestSchemaIsIdempotent(t *testing.T) {
 			t.Fatalf("повторный запуск schema.sql: %v", err)
 		}
 	}
-	if after := queryInt(t, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'`); after != before || before != 7 {
-		t.Errorf("таблиц было %d, стало %d (ожидалось 7)", before, after)
+	if after := queryInt(t, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'`); after != before || before != 8 {
+		t.Errorf("таблиц было %d, стало %d (ожидалось 8)", before, after)
 	}
 }
 

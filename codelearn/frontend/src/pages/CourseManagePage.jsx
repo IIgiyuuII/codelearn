@@ -120,10 +120,10 @@ export default function CourseManagePage({ courseId, onBack, onCourseChanged, on
   }
 
   function exportCsv() {
-    const header = ['Участник', 'Решено задач', 'Всего задач', 'Прогресс, %', 'Вступил', 'Последняя активность'];
+    const header = ['Участник', 'Решено задач', 'Всего задач', 'Прогресс, %', 'Вступил', 'Последняя активность', 'Подсказок ИИ'];
     const rows = members.map(m => [
       m.username, m.solvedCount, totalTasks, percent(m.solvedCount, totalTasks),
-      fmtDate(m.enrolledAt), fmtDate(m.lastActiveAt),
+      fmtDate(m.enrolledAt), fmtDate(m.lastActiveAt), m.hintCount ?? 0,
     ]);
     // BOM + «;» — чтобы Excel с русской локалью открыл файл сразу в нормальном виде
     const csv = '\uFEFF' + [header, ...rows].map(r => r.map(csvCell).join(';')).join('\r\n');
@@ -166,6 +166,7 @@ export default function CourseManagePage({ courseId, onBack, onCourseChanged, on
               <div className="cm-card"><div className="cm-card-num">{summary.memberCount}</div><div className="cm-card-label">участников</div></div>
               <div className="cm-card"><div className="cm-card-num">{summary.avgProgress}%</div><div className="cm-card-label">средний прогресс</div></div>
               <div className="cm-card"><div className="cm-card-num">{summary.completedCount}</div><div className="cm-card-label">прошли весь курс</div></div>
+              <div className="cm-card"><div className="cm-card-num">{summary.hintCount ?? 0}</div><div className="cm-card-label">подсказок ИИ запрошено</div></div>
             </div>
 
             {members.length === 0 ? (
@@ -182,7 +183,7 @@ export default function CourseManagePage({ courseId, onBack, onCourseChanged, on
                 <div className="cm-table-wrap">
                   <table className="cm-table">
                     <thead>
-                      <tr><th>Участник</th><th>Прогресс</th><th>Последняя активность</th><th>Вступил</th></tr>
+                      <tr><th>Участник</th><th>Прогресс</th><th>Подсказок ИИ</th><th>Последняя активность</th><th>Вступил</th></tr>
                     </thead>
                     <tbody>
                       {members.map(m => {
@@ -196,6 +197,7 @@ export default function CourseManagePage({ courseId, onBack, onCourseChanged, on
                                 <span className="cm-progress-text">{m.solvedCount} / {totalTasks}</span>
                               </div>
                             </td>
+                            <td className="cm-hints">{m.hintCount ?? 0}</td>
                             <td className="cm-muted">{fmtDate(m.lastActiveAt)}</td>
                             <td className="cm-muted">{fmtDate(m.enrolledAt)}</td>
                           </tr>
@@ -218,6 +220,7 @@ export default function CourseManagePage({ courseId, onBack, onCourseChanged, on
                             <span className="cm-taskrow-diff" style={{ color: DIFF_COLOR[t.difficulty] }}>●</span>
                             <div className="cm-bar cm-bar-wide"><div className="cm-bar-fill" style={{ width: `${pct}%` }} /></div>
                             <span className="cm-taskrow-count">{t.solvedCount} из {summary.memberCount}</span>
+                            <span className="cm-taskrow-hints" title="Сколько подсказок ИИ запросили по этой задаче">💡 {t.hintCount ?? 0}</span>
                           </div>
                         );
                       })}

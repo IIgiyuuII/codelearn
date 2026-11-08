@@ -2,7 +2,18 @@ import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-jest.mock('@monaco-editor/react', () => ({ __esModule: true, default: ({ value, language }) => <textarea data-testid="editor" data-language={language} readOnly value={value} /> }));
+jest.mock('@monaco-editor/react', () => ({
+  __esModule: true,
+  default: ({ value, language, onChange }) => (
+    <textarea data-testid="editor" data-language={language} value={value} onChange={e => onChange && onChange(e.target.value)} />
+  ),
+}));
+// Панель подсказок проверяется отдельно (HintPanel.test.jsx); здесь важно, что решатель передаёт ей верные данные
+const mockHintProps = jest.fn();
+jest.mock('../pages/HintPanel', () => ({
+  __esModule: true,
+  default: props => { mockHintProps(props); return <div data-testid="hint-panel" />; },
+}));
 jest.mock('../api', () => ({
   api: { getTask: jest.fn(), getExamples: jest.fn(), getProgress: jest.fn(), getTests: jest.fn(), markSolved: jest.fn() },
 }));
@@ -170,5 +181,48 @@ describe('выбор языка по задаче', () => {
     await userEvent.click(screen.getByRole('button', { name: '✓ Проверить' }));
     await waitFor(() => expect(api.markSolved).toHaveBeenCalledWith(1));
     expect(mockRunCode).toHaveBeenCalledWith('x', 'assertEqual(f(2), 4);');
+  });
+});
+
+
+describe('панель подсказок в решателе', () => {
+  const lastProps = () => mockHintProps.mock.calls[mockHintProps.mock.calls.length - 1][0];
+
+  test('панель получает id задачи, стартовый код и текущий код; результата пока нет', async () => {
+    await mount();
+    expect(screen.getByTestId('hint-panel')).toBeInTheDocument();
+    expect(lastProps()).toMatchObject({ taskId: 1, starterCode: 'def f(x): pass', code: 'def f(x): pass', lastResult: null });
+  });
+
+  test('изменения в редакторе сразу попадают в панель', async () => {
+    await mount();
+    await userEvent.clear(screen.getByTestId('editor'));
+    await userEvent.type(screen.getByTestId('editor'), 'return 1');
+    expect(lastProps().code).toBe('return 1');
+    expect(lastProps().starterCode).toBe('def f(x): pass'); // стартовый код не меняется
+  });
+
+  test('после запуска с ошибкой панель знает статус и текст', async () => {
+    mockRunCode.mockResolvedValue(RES({ status: 'runtime_error', error: 'NameError: x' }));
+    await mount();
+    await userEvent.click(screen.getByRole('button', { name: '▶ Запустить' }));
+    await waitFor(() => expect(lastProps().lastResult).toEqual({ status: 'runtime_error', text: 'NameError: x' }));
+  });
+
+  test('после непройденных тестов — test_failed', async () => {
+    mockRunCode.mockResolvedValue(RES({ status: 'test_failed', error: 'Тест не пройден' }));
+    await mount();
+    await userEvent.click(screen.getByRole('button', { name: '✓ Проверить' }));
+    await waitFor(() => expect(lastProps().lastResult).toEqual({ status: 'test_failed', text: 'Тест не пройден' }));
+  });
+
+  test('после таймаута — timeout; после успешного запуска — ok', async () => {
+    mockRunCode.mockResolvedValueOnce(RES({ status: 'timeout', error: 'Превышено время выполнения' }));
+    await mount();
+    await userEvent.click(screen.getByRole('button', { name: '▶ Запустить' }));
+    await waitFor(() => expect(lastProps().lastResult.status).toBe('timeout'));
+    mockRunCode.mockResolvedValueOnce(RES({ status: 'ok', output: 'привет\n' }));
+    await userEvent.click(screen.getByRole('button', { name: '▶ Запустить' }));
+    await waitFor(() => expect(lastProps().lastResult).toEqual({ status: 'ok', text: 'привет\n' }));
   });
 });

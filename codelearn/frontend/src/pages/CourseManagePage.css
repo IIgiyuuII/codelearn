@@ -59,7 +59,7 @@
 .cm-progress-text { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 .cm-tasklist { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 8px 18px; }
-.cm-taskrow { display: grid; grid-template-columns: 40px 1fr 14px minmax(80px, 200px) 90px; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.cm-taskrow { display: grid; grid-template-columns: 40px 1fr 14px minmax(80px, 200px) 90px 56px; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .cm-taskrow:last-child { border-bottom: none; }
 .cm-taskrow-num { color: var(--muted); font-size: 12px; }
 .cm-taskrow-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -163,6 +163,9 @@
 
 @media (max-width: 640px) {
   .cm-taskrow { grid-template-columns: 30px 1fr 80px; }
-  .cm-taskrow-diff, .cm-bar-wide { display: none; }
+  .cm-taskrow-diff, .cm-bar-wide, .cm-taskrow-hints { display: none; }
   .cm-header-spacer { display: none; }
 }
+
+.cm-hints { color: var(--muted); font-variant-numeric: tabular-nums; }
+.cm-taskrow-hints { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }

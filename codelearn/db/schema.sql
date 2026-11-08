@@ -65,3 +65,24 @@ CREATE INDEX IF NOT EXISTS idx_tasks_course       ON tasks(course_id);
 CREATE INDEX IF NOT EXISTS idx_examples_task      ON task_examples(task_id);
 CREATE INDEX IF NOT EXISTS idx_hidden_tests_task  ON task_hidden_tests(task_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_course ON course_enrollments(course_id);
+
+-- Подсказки ИИ: каждая выданная подсказка (для лимитов, повторного показа и анализа в дипломе)
+CREATE TABLE IF NOT EXISTS task_hints (
+    id                SERIAL PRIMARY KEY,
+    user_id           INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    task_id           INT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    level             SMALLINT NOT NULL CHECK (level BETWEEN 1 AND 3),   -- 1 намёк, 2 где искать, 3 план
+    code_hash         CHAR(64)  NOT NULL,                                -- sha256 кода студента
+    student_code      TEXT      NOT NULL,                                -- код на момент запроса
+    result_status     VARCHAR(20),                                       -- итог последнего запуска: ok / test_failed / runtime_error / timeout
+    hint_text         TEXT      NOT NULL,
+    model             VARCHAR(60),
+    prompt_tokens     INT,
+    completion_tokens INT,
+    latency_ms        INT,
+    helpful           BOOLEAN,                                           -- оценка студента; NULL — не оценил
+    created_at        TIMESTAMP DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_task_hints_user_task ON task_hints(user_id, task_id, id);
+CREATE INDEX IF NOT EXISTS idx_task_hints_created   ON task_hints(created_at);
+CREATE INDEX IF NOT EXISTS idx_task_hints_task      ON task_hints(task_id);

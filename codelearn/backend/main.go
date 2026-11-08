@@ -89,6 +89,7 @@ func loadConfig() (dsn string) {
 	if password == "" {
 		log.Fatal("❌ Не задан DB_PASSWORD (файл .env или переменная окружения)")
 	}
+	loadHintConfig()
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		dsnQuote(getenv("DB_HOST", "localhost")),
 		dsnQuote(getenv("DB_PORT", "5432")),
@@ -605,6 +606,7 @@ type MemberStat struct {
 	EnrolledAt   *time.Time `json:"enrolledAt"`
 	SolvedCount  int        `json:"solvedCount"`
 	LastActiveAt *time.Time `json:"lastActiveAt"`
+	HintCount    int        `json:"hintCount"`
 }
 
 type TaskStat struct {
@@ -612,6 +614,7 @@ type TaskStat struct {
 	Title       string `json:"title"`
 	Difficulty  string `json:"difficulty"`
 	SolvedCount int    `json:"solvedCount"`
+	HintCount   int    `json:"hintCount"`
 }
 
 // GET /api/courses/:id/stats — участники и их прогресс (владелец в статистику не входит)
@@ -681,9 +684,32 @@ func handleCourseStats(w http.ResponseWriter, r *http.Request) {
 		members = append(members, m)
 	}
 
+	// Подсказки ИИ: по участникам и по задачам (владелец в статистику не входит)
+	hintsByUser, hintsByTask := map[int]int{}, map[int]int{}
+	if hrows, err := db.Query(`
+		SELECT h.user_id, h.task_id, COUNT(*)
+		FROM task_hints h JOIN tasks t ON t.id = h.task_id
+		WHERE t.course_id = $1 AND h.user_id <> $2
+		GROUP BY h.user_id, h.task_id`, id, uid); err == nil {
+		defer hrows.Close()
+		for hrows.Next() {
+			var userID, taskID, n int
+			hrows.Scan(&userID, &taskID, &n)
+			hintsByUser[userID] += n
+			hintsByTask[taskID] += n
+		}
+	}
+	for i := range members {
+		members[i].HintCount = hintsByUser[members[i].UserID]
+	}
+	for i := range tasks {
+		tasks[i].HintCount = hintsByTask[tasks[i].ID]
+	}
+
 	totalTasks := len(tasks)
-	completed, solvedSum := 0, 0
+	completed, solvedSum, hintTotal := 0, 0, 0
 	for _, m := range members {
+		hintTotal += m.HintCount
 		solvedSum += m.SolvedCount
 		if totalTasks > 0 && m.SolvedCount >= totalTasks {
 			completed++
@@ -704,6 +730,7 @@ func handleCourseStats(w http.ResponseWriter, r *http.Request) {
 		"tasks":      tasks,
 		"summary": map[string]any{
 			"memberCount": len(members), "avgProgress": avg, "completedCount": completed,
+			"hintCount": hintTotal,
 		},
 	})
 }
@@ -1276,9 +1303,14 @@ func router() http.Handler {
 		}
 	}))
 
+	mux.HandleFunc("/api/hints/", authMiddleware(handleHintFeedback))
 	mux.HandleFunc("/api/tasks/", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.HasSuffix(path, "/hint") && r.Method == http.MethodPost:
+			handleRequestHint(w, r)
+		case strings.HasSuffix(path, "/hints") && r.Method == http.MethodGet:
+			handleGetHints(w, r)
 		case strings.HasSuffix(path, "/examples") && r.Method == http.MethodGet:
 			handleGetExamples(w, r)
 		case strings.HasSuffix(path, "/get-tests") && r.Method == http.MethodPost:
@@ -1304,6 +1336,7 @@ func router() http.Handler {
 func main() {
 	dsn := loadConfig()
 	initDB(dsn)
+	checkHintSchema()
 	var courseCount int
 	db.QueryRow(`SELECT COUNT(*) FROM courses`).Scan(&courseCount)
 

@@ -20,18 +20,18 @@ import CourseTasksPage from '../pages/CourseTasksPage';
 const STATS = {
   course: { id: 7, title: 'Алгоритмы', description: 'Описание', language: 'python', accessCode: 'ABCD2345' },
   totalTasks: 3,
-  summary: { memberCount: 2, avgProgress: 67, completedCount: 1 },
+  summary: { memberCount: 2, avgProgress: 67, completedCount: 1, hintCount: 5 },
   members: [
-    { userId: 2, username: 'carol', enrolledAt: '2026-10-01T10:00:00Z', solvedCount: 3, lastActiveAt: '2026-10-20T12:00:00Z' },
-    { userId: 3, username: '=HYPERLINK("x")', enrolledAt: '2026-10-02T10:00:00Z', solvedCount: 1, lastActiveAt: null },
+    { userId: 2, username: 'carol', enrolledAt: '2026-10-01T10:00:00Z', solvedCount: 3, lastActiveAt: '2026-10-20T12:00:00Z', hintCount: 3 },
+    { userId: 3, username: '=HYPERLINK("x")', enrolledAt: '2026-10-02T10:00:00Z', solvedCount: 1, lastActiveAt: null, hintCount: 2 },
   ],
   tasks: [
-    { id: 1, title: 'Сумма', difficulty: 'easy', solvedCount: 2 },
-    { id: 2, title: 'Факториал', difficulty: 'medium', solvedCount: 1 },
-    { id: 3, title: 'Палиндром', difficulty: 'hard', solvedCount: 1 },
+    { id: 1, title: 'Сумма', difficulty: 'easy', solvedCount: 2, hintCount: 1 },
+    { id: 2, title: 'Факториал', difficulty: 'medium', solvedCount: 1, hintCount: 4 },
+    { id: 3, title: 'Палиндром', difficulty: 'hard', solvedCount: 1, hintCount: 0 },
   ],
 };
-const EMPTY = { ...STATS, members: [], tasks: [], totalTasks: 0, summary: { memberCount: 0, avgProgress: 0, completedCount: 0 } };
+const EMPTY = { ...STATS, members: [], tasks: [], totalTasks: 0, summary: { memberCount: 0, avgProgress: 0, completedCount: 0, hintCount: 0 } };
 
 const mount = (stats = STATS, extra = {}) => {
   api.getCourseStats.mockResolvedValue(stats);
@@ -56,6 +56,30 @@ describe('вкладка «Участники»', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);  // у второго нет активности
   });
 
+  test('подсказки ИИ: карточка со всего курса, колонка по участникам и значок по каждой задаче', async () => {
+    mount();
+    await screen.findByText('carol');
+    expect(screen.getByText('подсказок ИИ запрошено').previousSibling).toHaveTextContent('5');
+    const rows = screen.getAllByRole('row');
+    const carol = rows.find(r => within(r).queryByText('carol'));
+    expect(within(carol).getByText('3', { selector: 'td.cm-hints' })).toBeInTheDocument();
+    const second = rows.find(r => within(r).queryByText('=HYPERLINK("x")'));
+    expect(within(second).getByText('2', { selector: 'td.cm-hints' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Подсказок ИИ' })).toBeInTheDocument();
+    expect(screen.getAllByTitle('Сколько подсказок ИИ запросили по этой задаче').map(e => e.textContent)).toEqual(['💡 1', '💡 4', '💡 0']);
+  });
+
+  test('ответ сервера без счётчиков подсказок (старая версия) показывает нули, а не ломает страницу', async () => {
+    const legacy = JSON.parse(JSON.stringify(STATS));
+    delete legacy.summary.hintCount;
+    legacy.members.forEach(m => delete m.hintCount);
+    legacy.tasks.forEach(t => delete t.hintCount);
+    mount(legacy);
+    await screen.findByText('carol');
+    expect(screen.getByText('подсказок ИИ запрошено').previousSibling).toHaveTextContent('0');
+    expect(screen.getAllByTitle('Сколько подсказок ИИ запросили по этой задаче').map(e => e.textContent)).toEqual(['💡 0', '💡 0', '💡 0']);
+  });
+
   test('пустой курс: подсказка с кодом доступа, без таблицы и CSV', async () => {
     mount(EMPTY);
     expect(await screen.findByText(/Пока никто не вступил/)).toBeInTheDocument();
@@ -76,8 +100,8 @@ describe('вкладка «Участники»', () => {
     expect(Array.from(bytes.slice(0, 3))).toEqual([0xEF, 0xBB, 0xBF]);        // UTF-8 BOM для Excel
     const text = new (require('util').TextDecoder)('utf-8').decode(bytes.slice(3));
     const lines = text.split('\r\n');
-    expect(lines[0]).toBe('"Участник";"Решено задач";"Всего задач";"Прогресс, %";"Вступил";"Последняя активность"');
-    expect(lines[1]).toBe('"carol";"3";"3";"100";"01.10.2026";"20.10.2026"');
+    expect(lines[0]).toBe('"Участник";"Решено задач";"Всего задач";"Прогресс, %";"Вступил";"Последняя активность";"Подсказок ИИ"');
+    expect(lines[1]).toBe('"carol";"3";"3";"100";"01.10.2026";"20.10.2026";"3"');
     expect(lines[2].startsWith(`"'=HYPERLINK(""x"")"`)).toBe(true);   // формула обезврежена, кавычки экранированы
     expect(lines[2]).toContain('"33"');
     expect(filename).toBe('ООП_ курс_1 — участники.csv');

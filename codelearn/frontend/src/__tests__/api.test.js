@@ -33,6 +33,10 @@ describe('формирование запросов', () => {
     ['getTests', [7], 'POST', '/api/tasks/7/get-tests', undefined],
     ['markSolved', [7], 'POST', '/api/tasks/7/solved', undefined],
     ['getProgress', [], 'GET', '/api/progress', undefined],
+    ['getHints', [7], 'GET', '/api/tasks/7/hints', undefined],
+    ['requestHint', [7, { code: 'x', lastResult: { status: 'ok', text: 'y' } }], 'POST', '/api/tasks/7/hint', { code: 'x', lastResult: { status: 'ok', text: 'y' } }],
+    ['rateHint', [12, true], 'POST', '/api/hints/12/feedback', { helpful: true }],
+    ['rateHint', [12, null], 'POST', '/api/hints/12/feedback', { helpful: null }],
   ];
 
   test.each(table)('%s → %s %s', async (name, args, method, url, body) => {

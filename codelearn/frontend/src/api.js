@@ -75,4 +75,13 @@ export const api = {
   getTests: (taskId) => request(`/tasks/${taskId}/get-tests`, { method: 'POST' }),
   markSolved: (taskId) => request(`/tasks/${taskId}/solved`, { method: 'POST' }),
   getProgress: () => request('/progress'),
+
+  // ─── Подсказки ИИ ───
+  // Состояние и история подсказок по задаче: { enabled, hints, nextLevel, remaining, cooldownSeconds, maxLevel }
+  getHints: (taskId) => request(`/tasks/${taskId}/hints`),
+  // Следующая подсказка. lastResult — итог последнего запуска: { status, text }
+  requestHint: (taskId, { code, lastResult }) =>
+    request(`/tasks/${taskId}/hint`, { method: 'POST', body: { code, lastResult } }),
+  // Оценка подсказки: true — помогла, false — нет, null — снять оценку
+  rateHint: (hintId, helpful) => request(`/hints/${hintId}/feedback`, { method: 'POST', body: { helpful } }),
 };

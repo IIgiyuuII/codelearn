@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
 import { api } from '../api';
 import { useCodeEngine, LANGUAGE_NAMES } from '../hooks/useCodeEngine';
+import HintPanel from './HintPanel';
 import './SolverPage.css';
 
 export default function SolverPage({ taskId, onBack }) {
@@ -188,6 +189,8 @@ export default function SolverPage({ taskId, onBack }) {
   const iconState = !output ? 'none' : (output.isError || output.passed === false) ? 'error' : 'info';
   const pyReady = pyStatus === 'ready';
   const busy = checking || running;
+  // Итог последнего запуска или проверки: подсказка ИИ опирается именно на него
+  const lastResult = output ? { status: output.kind || (output.isError ? 'runtime_error' : 'ok'), text: output.text } : null;
 
   if (loadError) {
     return (
@@ -230,6 +233,8 @@ export default function SolverPage({ taskId, onBack }) {
         )}
 
         <p className="solver-task-desc">{task.description}</p>
+
+        <HintPanel taskId={taskId} code={code} starterCode={task.starterCode} lastResult={lastResult} />
 
         <div className="solver-wasm-info">
           <div className={`solver-wasm-dot ${pyStatus}`} />
